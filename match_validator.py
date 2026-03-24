@@ -46,19 +46,27 @@ def create_identity_challenge(target_citizen, my_name):
         f.write(my_secret)
 
     # Bob MUST include his status token for EVERY category defined in the manifest
+    # He pulls these tokens from HIS OWN attestation.
     blinded_requirements = []
     all_categories = manifest['categories'].keys()
     
-    for cat in all_categories:
-        found = False
-        for status in ["True", "False"]:
-            ref_token = manifest['reference_tokens'].get(f"{cat}:{status}")
-            if ref_token in my_attestation['payload']['earned_tokens']:
-                blinded_requirements.append(blind_token(ref_token, my_secret))
-                found = True
-                break
-        if not found:
-            print(f"Error: Category '{cat}' from manifest not found in your attestation!")
+    # Sort categories to ensure Bob and Alice always process them in the same order
+    sorted_categories = sorted(list(all_categories))
+    
+    for cat in sorted_categories:
+        # Note: Bob doesn't know if he has True or False for a category here, 
+        # he just knows he has ONE token per category in his attestation.
+        # Since the Government issues tokens in the order of categories in the manifest:
+        # We need to find the token in Bob's attestation that corresponds to this category.
+        
+        # In this implementation, the Government issues tokens in manifest category order.
+        # So we can just use the index.
+        idx = sorted_categories.index(cat)
+        if idx < len(my_attestation['payload']['earned_tokens']):
+            token = my_attestation['payload']['earned_tokens'][idx]
+            blinded_requirements.append(blind_token(token, my_secret))
+        else:
+            print(f"Error: Token for category '{cat}' not found in your attestation!")
             return
 
     challenge = {
@@ -66,7 +74,7 @@ def create_identity_challenge(target_citizen, my_name):
         "to": target_citizen,
         "blinded_requirements": blinded_requirements,
         "nonce": secrets.token_hex(16),
-        "total_categories": len(all_categories)
+        "total_categories": len(sorted_categories)
     }
 
     filename = f"identity_challenge_{my_name}_to_{target_citizen}.json"
@@ -96,11 +104,20 @@ def respond_to_identity_challenge(challenge_file, my_name):
     # Alice blinds ALL her own earned tokens
     blinded_my_tokens = [blind_token(t, my_secret) for t in attestation['payload']['earned_tokens']]
 
+    # We send the attestation metadata (citizen name, etc) but NOT the raw tokens.
+    # The receiver will reconstruct the raw tokens ONLY if they match.
+    payload_no_tokens = {
+        "citizen": attestation['payload']['citizen'],
+        "earned_tokens": None, # Stripped for privacy
+        "version": attestation['payload']['version']
+    }
+
     proof = {
         "nonce": challenge['nonce'],
         "double_blinded_requirements": double_blinded_requirements,
         "blinded_my_tokens": blinded_my_tokens,
-        "original_attestation": attestation,
+        "attestation_payload": payload_no_tokens,
+        "signature": attestation['signature'],
         "total_categories": challenge['total_categories']
     }
 
@@ -118,7 +135,7 @@ def verify_identity_proof(proof_file, my_name):
     with open(proof_file, "r") as f:
         proof = json.load(f)
     
-    peer_name = proof['original_attestation']['payload']['citizen']
+    peer_name = proof['attestation_payload']['citizen']
     secret_file = f"match_secret_{my_name}_to_{peer_name}.bin"
     if not os.path.exists(secret_file):
         print("Error: Session secret not found.")
@@ -126,38 +143,65 @@ def verify_identity_proof(proof_file, my_name):
     with open(secret_file, "r") as f:
         my_secret = f.read()
 
-    # 1. Verify Government Signature
-    with open(MANIFEST_FILE, "r") as f:
-        manifest = json.load(f)
-    public_key = serialization.load_pem_public_key(manifest['public_key'].encode('utf-8'))
-    payload_bytes = json.dumps(proof['original_attestation']['payload'], sort_keys=True).encode('utf-8')
-    signature_bytes = bytes.fromhex(proof['original_attestation']['signature'])
-    
-    try:
-        public_key.verify(signature_bytes, payload_bytes)
-        print("✔ Government Signature Verified.")
-    except:
-        print("✖ Invalid Gov Signature!")
+    # Bob's own attestation is needed to reconstruct Alice's tokens if they match
+    my_attestation_file = f"attestation_{my_name}.json"
+    if not os.path.exists(my_attestation_file):
+        print(f"Error: Your own attestation {my_attestation_file} not found.")
         return
+    with open(my_attestation_file, "r") as f:
+        my_attestation = json.load(f)
 
-    # 2. Identity Match Logic (All-or-Nothing)
+    # 1. Identity Match Logic (All-or-Nothing)
     # Bob applies his secret to Alice's blinded tokens
     alice_tokens_double_blinded = [blind_token(t, my_secret) for t in proof['blinded_my_tokens']]
     
     matches = 0
     total_expected = proof['total_categories']
     
-    # We check how many of Bob's double-blinded requirements exist in Alice's set
-    for req in proof['double_blinded_requirements']:
-        if req in alice_tokens_double_blinded:
+    # Keep track of the un-blinded tokens for signature verification
+    reconstructed_tokens = []
+    
+    # Check alignment
+    for i in range(total_expected):
+        req = proof['double_blinded_requirements'][i]
+        alice_token_db = alice_tokens_double_blinded[i]
+        
+        if req == alice_token_db:
             matches += 1
+            # If they match, Bob knows Alice's token is the same as HIS token for this category
+            reconstructed_tokens.append(my_attestation['payload']['earned_tokens'][i])
+        else:
+            # We can't reconstruct tokens for mismatches
+            reconstructed_tokens.append(None)
 
     print(f"\nIdentity Analysis for {peer_name}:")
     
-    # ALL-OR-NOTHING: We only reveal if it is a PERFECT match
+    # 2. Verify Government Signature (ONLY if it was a perfect match)
     if matches == total_expected:
-        print(f" - Alignment: {matches} / {total_expected} categories matched.")
-        print("\nOVERALL RESULT: ✔ IDENTITY MATCH (Profiles are identical)")
+        with open(MANIFEST_FILE, "r") as f:
+            manifest = json.load(f)
+        
+        public_key = serialization.load_pem_public_key(manifest['public_key'].encode('utf-8'))
+        
+        # Reconstruct the original payload the government signed
+        original_payload = {
+            "citizen": peer_name,
+            "earned_tokens": reconstructed_tokens,
+            "version": proof['attestation_payload']['version']
+        }
+        
+        # Re-derive the exact bytes the government signed
+        payload_bytes = json.dumps(original_payload, sort_keys=True).encode('utf-8')
+        signature_bytes = bytes.fromhex(proof['signature'])
+        
+        try:
+            public_key.verify(signature_bytes, payload_bytes)
+            print("✔ Government Signature Verified.")
+            print(f" - Alignment: {matches} / {total_expected} categories matched.")
+            print("\nOVERALL RESULT: ✔ IDENTITY MATCH (Profiles are identical)")
+        except Exception as e:
+            print(f"✖ Invalid Gov Signature! ({e})")
+            return
     else:
         # We do NOT reveal how many matched, to prevent bit-scraping
         print(" - Alignment: MISMATCH detected.")

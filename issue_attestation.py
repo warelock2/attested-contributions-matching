@@ -39,19 +39,14 @@ def init_government(categories_str):
     ).decode('utf-8')
 
     categories = {}
-    reference_tokens = {}
     for item in categories_str.split(','):
         name, min_val = item.split(':')
         name = name.strip()
         categories[name] = float(min_val.strip())
-        # Pre-generate reference tokens for both True and False
-        reference_tokens[f"{name}:True"] = generate_token(master_secret, name, True)
-        reference_tokens[f"{name}:False"] = generate_token(master_secret, name, False)
 
     manifest = {
         "public_key": public_key_bytes,
-        "categories": categories,
-        "reference_tokens": reference_tokens
+        "categories": categories
     }
 
     with open(MANIFEST_FILE, "w") as f:
@@ -82,7 +77,11 @@ def process_attestation(citizen_name):
 
     # Calculate pass/fail and collect the corresponding tokens
     earned_tokens = []
-    for cat, min_val in manifest['categories'].items():
+    # Sort categories to ensure consistent token ordering for matching
+    sorted_categories = sorted(list(manifest['categories'].keys()))
+    
+    for cat in sorted_categories:
+        min_val = manifest['categories'][cat]
         status = contribution.get('contributions', {}).get(cat, 0) >= min_val
         token = generate_token(master_secret, cat, status)
         earned_tokens.append(token)
