@@ -13,6 +13,16 @@ The system uses a "Trust Triangle" between Citizens, the Government, and Peers:
     - **Double-Blind**: The Matcher hides which categories he is checking, and the Prover (Alice) hides her other statuses.
     - **Non-transferable**: The match result is session-specific and cannot be "leaked" to a third party.
 
+## Cryptographic Protocols
+
+| Protocol | Type | Usage in this Project |
+| :--- | :--- | :--- |
+| **Ed25519** | Asymmetric Signature | Government signs attestations to ensure authenticity and non-forgeability. |
+| **Commutative XOR** | Blinding Protocol | Allows peers to match encrypted tokens without revealing policies or status labels. |
+| **HMAC-SHA256** | Keyed Hashing | Government generates blinded reference tokens for each category-status pair. |
+| **SHA-256** | Cryptographic Hash | Provides data integrity and serves as a building block for blinding operations. |
+| **CSPRNG** | Randomness | Generates session-specific nonces to ensure match results are non-transferable. |
+
 ## File Manifest
 
 ### Source Scripts
