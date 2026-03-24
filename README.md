@@ -16,6 +16,8 @@ The system uses a "Trust Triangle" between Citizens, the Government, and Peers:
 
 ## Cryptographic Protocols
 
+We use "Private Set Intersection (PSI) based on Commutative Blinding" or just "Commutative PSI", rather than needing full-blown "Zero Knowledge Proofs" or "ZKP" to achieve the project's goals.
+
 | Protocol | Type | Usage in this Project |
 | :--- | :--- | :--- |
 | **Ed25519** | Asymmetric Signature | Government signs attestations to ensure authenticity and non-forgeability. |
