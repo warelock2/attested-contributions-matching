@@ -197,7 +197,6 @@ This system design aligns with the principles of voluntaryism and spontaneous or
    * Because the proof is non-transferable (mathematically bound to the session), B cannot prove to C that A failed. B can only
      spread a rumor. This protects A from systemic cancellation while still allowing B to exercise their freedom of association.
 
-  Conclusion
   This system models Libertarian Panarchism implemented via cryptography. It allows for the emergence of distinct, voluntary
   communities co-existing within the same physical territory, defined not by borders but by their cryptographic
   handshake. It maximizes individual liberty by making funding voluntary, but preserves community cohesion by allowing individuals
